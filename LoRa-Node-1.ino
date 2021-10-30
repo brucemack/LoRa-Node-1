@@ -48,20 +48,20 @@ RH_RF95 rf95(ss, dio0);
 RHMesh mesh_manager(rf95, MY_NODE_ADDR);
 
 void configRadio(RH_RF95& radio) {
-  radio.setModemConfig(RH_RF95::ModemConfigChoice::Bw125Cr48Sf4096);
+  //radio.setModemConfig(RH_RF95::ModemConfigChoice::Bw125Cr48Sf4096);
   radio.setFrequency(frequency);
   radio.setTxPower(txPower);
   // Adjust over-current protection
-  radio.spiWrite(RH_RF95_REG_0B_OCP, 0x31);
+  //radio.spiWrite(RH_RF95_REG_0B_OCP, 0x31);
   //radio.setSpreadingFactor(spreadingFactor);
   //radio.setSignalBandwidth(signalBandwidth);
   //radio.setCodingRate4(codingRate);
-  radio.setThisAddress(address);
+  //radio.setThisAddress(address);
 }
 
 void setup() {
 
-  delay(1000);
+  delay(5000);
   Serial.begin(115200);
   Serial.println("WARS Mesh Node 3");
   Serial.print(F("Crystal frequency "));
@@ -80,15 +80,11 @@ void setup() {
   // Per datasheet, wait 5ms
   delay(5);
 
-  if (!rf95.init()) {
-    Serial.println("driver init failed");
+  if (!mesh_manager.init()) {
+    Serial.println("LoRa init failed");
   } else {
     configRadio(rf95);
-    if (!mesh_manager.init()) {
-      Serial.println("manager init failed");
-    } else {
-      Serial.println("LoRa Initializing OK!");
-    }
+    Serial.println("LoRa Initializing OK!");
   }
 
   // Turn off WIFI and BlueTooth to reduce power 
