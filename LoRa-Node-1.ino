@@ -1,4 +1,5 @@
 // REMOTE
+// 80mA idle, 160mA transmit
 
 #include <SPI.h>
 #include <RH_RF95.h>
@@ -10,7 +11,8 @@
 // ESP32
 #define ss 5
 #define rst 14
-#define dio0 2
+#define dio0 4
+#define LED_PIN 2
 
 // Arduino Pro Mini
 //#define ss 10
@@ -19,14 +21,15 @@
 
 // Channel configurations
 //float frequency = 434;
-float frequency = 915;
+float frequency = 916;
 // Transmit power in dBm
 int txPower = 20;
 // Higher spreading factor for longer distance
-int spreadingFactor = 12;
+int spreadingFactor = 9;
 // Setup BandWidth, option: 7800,10400,15600,20800,31250,41700,62500,125000,250000,500000
 // Lower BandWidth for longer distance.
-long signalBandwidth = 125000;
+//long signalBandwidth = 125000;
+long signalBandwidth = 31250;
 // Setup Coding Rate:5(4/5),6(4/6),7(4/7),8(4/8) 
 int codingRate = 5;
 // Address
@@ -42,7 +45,7 @@ unsigned long tick_count = 0;
 
 // Watchdog timeout in seconds (NOTE: I think this time might be off because
 // we are changing the CPU clock frequency)
-#define WDT_TIMEOUT 10
+#define WDT_TIMEOUT 60
 
 RH_RF95 rf95(ss, dio0);
 RHMesh mesh_manager(rf95, MY_NODE_ADDR);
@@ -51,9 +54,9 @@ void configRadio(RH_RF95& radio) {
   //radio.setModemConfig(RH_RF95::ModemConfigChoice::Bw125Cr48Sf4096);
   radio.setFrequency(frequency);
   radio.setTxPower(txPower);
+  radio.setSpreadingFactor(spreadingFactor);
   // Adjust over-current protection
-  //radio.spiWrite(RH_RF95_REG_0B_OCP, 0x31);
-  //radio.setSpreadingFactor(spreadingFactor);
+  radio.spiWrite(RH_RF95_REG_0B_OCP, 0x31);
   //radio.setSignalBandwidth(signalBandwidth);
   //radio.setCodingRate4(codingRate);
   //radio.setThisAddress(address);
@@ -67,8 +70,12 @@ void setup() {
   Serial.print(F("Crystal frequency "));
   Serial.println(getXtalFrequencyMhz());
 
+  // LED
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+
   // Slow down ESP32 to 10 MHz in order to reduce battery consumption
-  //setCpuFrequencyMhz(10);
+  setCpuFrequencyMhz(10);
   
   // Reset the radio 
   pinMode(rst, OUTPUT);
@@ -84,7 +91,16 @@ void setup() {
     Serial.println("LoRa init failed");
   } else {
     configRadio(rf95);
+
+    // Diagnostics
     Serial.println("LoRa Initializing OK!");
+    digitalWrite(LED_PIN, HIGH);
+    delay(200);
+    digitalWrite(LED_PIN, LOW);
+    delay(200);
+    digitalWrite(LED_PIN, HIGH);
+    delay(200);
+    digitalWrite(LED_PIN, LOW);
   }
 
   // Turn off WIFI and BlueTooth to reduce power 
