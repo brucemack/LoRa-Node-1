@@ -62,7 +62,7 @@ unsigned long tick_count = 0;
 RH_RF95 rf95(ss, dio0);
 RHMesh mesh_manager(rf95, MY_NODE_ADDR);
 
-//Preferences preferences;
+Preferences preferences;
 
 void configRadio(RH_RF95& radio) {
   //radio.setModemConfig(RH_RF95::ModemConfigChoice::Bw125Cr48Sf4096);
@@ -105,11 +105,13 @@ void setup() {
   Serial.print(F("Low battery limit: "));
   Serial.println(lowBatteryLimitMv);
 
-  //preferences.begin("my-app", false); 
-  //uint16_t bootCount = preferences.getUShort("bootcount", 0);
+  preferences.begin("my-app", false); 
+  uint16_t bootCount = preferences.getUShort("bootcount", 0);
   
-  Serial.print(F("Low battery limit: "));
-  Serial.println(lowBatteryLimitMv);
+  Serial.print(F("Boot count: "));
+  Serial.println(bootCount);
+
+  preferences.putUShort("bootcount", bootCount+1);
   
   // Reset the radio 
   pinMode(rst, OUTPUT);
@@ -152,7 +154,7 @@ void loop() {
   // Check the battery
   uint16_t battery = checkBattery();
   // If the battery is low then deep sleep
-  if (battery < 4200) {
+  if (battery < lowBatteryLimitMv) {
     Serial.println("Low battery detected, going to sleep ...");
     // Put the system into a deep sleep that will be awakened using the timer
     esp_sleep_enable_timer_wakeup(DEEP_SLEEP_SECONDS * US_TO_S_FACTOR);
