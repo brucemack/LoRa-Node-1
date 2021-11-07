@@ -1,11 +1,13 @@
 // REMOTE
-// 80mA idle, 160mA transmit
+// 80mA idle, 160mA transmit with normal clock
+// 30mA at 10 MHz clock rate
 
 #include <SPI.h>
 #include <RH_RF95.h>
 #include <RHMesh.h>
 #include "WiFi.h"
 #include <esp_task_wdt.h>
+#include <Preferences.h>
 
 // Define the pins used by the LoRa transceiver module
 // ESP32
@@ -13,11 +15,14 @@
 #define rst 14
 #define dio0 4
 #define LED_PIN 2
+#define BATTERY_LEVEL_PIN 33
 
 // Arduino Pro Mini
 //#define ss 10
 //#define rst 9
 //#define dio0 2
+
+#define US_TO_S_FACTOR 1000000
 
 // Channel configurations
 //float frequency = 434;
@@ -35,6 +40,13 @@ int codingRate = 5;
 // Address
 int address = 0xf3;
 
+// Battery reading scale
+float batteryScale = (3.3 / 4096.0) * 2.235;
+// Battery limit
+uint16_t lowBatteryLimitMv = 3600;
+// Deep sleep duration when low battery is detected
+#define DEEP_SLEEP_SECONDS 60 * 30
+
 #define MY_NODE_ADDR 3
 #define VERSION 1
 
@@ -45,10 +57,12 @@ unsigned long tick_count = 0;
 
 // Watchdog timeout in seconds (NOTE: I think this time might be off because
 // we are changing the CPU clock frequency)
-#define WDT_TIMEOUT 60
+#define WDT_TIMEOUT 15
 
 RH_RF95 rf95(ss, dio0);
 RHMesh mesh_manager(rf95, MY_NODE_ADDR);
+
+//Preferences preferences;
 
 void configRadio(RH_RF95& radio) {
   //radio.setModemConfig(RH_RF95::ModemConfigChoice::Bw125Cr48Sf4096);
@@ -62,13 +76,18 @@ void configRadio(RH_RF95& radio) {
   //radio.setThisAddress(address);
 }
 
+// Returns the battery level in mV
+uint16_t checkBattery() {
+    float batteryLevel = (float)analogRead(BATTERY_LEVEL_PIN) * batteryScale;
+    return batteryLevel * 1000.0;
+}
+
 void setup() {
 
   delay(5000);
+  
   Serial.begin(115200);
-  Serial.println("WARS Mesh Node 3");
-  Serial.print(F("Crystal frequency "));
-  Serial.println(getXtalFrequencyMhz());
+  Serial.println("KC1FSZ LoRa Mesh System");
 
   // LED
   pinMode(LED_PIN, OUTPUT);
@@ -76,6 +95,21 @@ void setup() {
 
   // Slow down ESP32 to 10 MHz in order to reduce battery consumption
   setCpuFrequencyMhz(10);
+
+  Serial.print("This is node ");
+  Serial.println(MY_NODE_ADDR);
+  Serial.print(F("Crystal frequency "));
+  Serial.println(getXtalFrequencyMhz());
+  Serial.print(F("Battery level: "));
+  Serial.println(checkBattery());
+  Serial.print(F("Low battery limit: "));
+  Serial.println(lowBatteryLimitMv);
+
+  //preferences.begin("my-app", false); 
+  //uint16_t bootCount = preferences.getUShort("bootcount", 0);
+  
+  Serial.print(F("Low battery limit: "));
+  Serial.println(lowBatteryLimitMv);
   
   // Reset the radio 
   pinMode(rst, OUTPUT);
@@ -115,13 +149,22 @@ void setup() {
 
 void loop() {
 
+  // Check the battery
+  uint16_t battery = checkBattery();
+  // If the battery is low then deep sleep
+  if (battery < 4200) {
+    Serial.println("Low battery detected, going to sleep ...");
+    // Put the system into a deep sleep that will be awakened using the timer
+    esp_sleep_enable_timer_wakeup(DEEP_SLEEP_SECONDS * US_TO_S_FACTOR);
+    esp_deep_sleep_start();
+  }
+  
   // Wait to receive a message
   uint8_t rec_buf[RH_RF95_MAX_MESSAGE_LEN];
   uint8_t rec_len = RH_RF95_MAX_MESSAGE_LEN;
   uint8_t rec_source = 0;
   uint16_t timeout = 1000;
 
-  // Wait for a message
   if (mesh_manager.recvfromAckTimeout(rec_buf, &rec_len, timeout, &rec_source)) {
 
     rec_count++;
@@ -136,9 +179,9 @@ void loop() {
     // Ping request
     if (rec_buf[1] == 1) {
 
-        uint16_t battery = analogRead(33);
         // Measure uptime
         int32_t uptime_seconds = esp_timer_get_time() / 1000000L;
+        uint16_t battery = checkBattery();
         
         // Build ping response
         uint8_t snd_buf[36];
@@ -154,7 +197,7 @@ void loop() {
         // RSSI of last received message
         snd_buf[12] = (last_rssi >> 8) & 0xff;
         snd_buf[13] = last_rssi & 0xff;
-        // Battery reading
+        // Battery reading in mv (16 bits)
         snd_buf[14] = (battery >> 8) & 0xff;
         snd_buf[15] = battery & 0xff;
         // Uptime 
