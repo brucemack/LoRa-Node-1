@@ -41,11 +41,11 @@ int codingRate = 5;
 int address = 0xf3;
 
 // Battery reading scale
-float batteryScale = (3.3 / 4096.0) * 2.235;
+float batteryScale = (3.3 / 4096.0) * 2.3;
 // Battery limit
 uint16_t lowBatteryLimitMv = 3600;
 // Deep sleep duration when low battery is detected
-#define DEEP_SLEEP_SECONDS 60 * 30
+#define DEEP_SLEEP_SECONDS 60 * 15
 
 #define MY_NODE_ADDR 3
 #define VERSION 1
@@ -106,12 +106,15 @@ void setup() {
   Serial.println(lowBatteryLimitMv);
 
   preferences.begin("my-app", false); 
-  uint16_t bootCount = preferences.getUShort("bootcount", 0);
-  
+
+  uint16_t bootCount = preferences.getUShort("bootcount", 0);  
   Serial.print(F("Boot count: "));
   Serial.println(bootCount);
-
   preferences.putUShort("bootcount", bootCount+1);
+
+  uint16_t sleepCount = preferences.getUShort("sleepcount", 0);  
+  Serial.print(F("Sleep count: "));
+  Serial.println(sleepCount);
   
   // Reset the radio 
   pinMode(rst, OUTPUT);
@@ -156,6 +159,9 @@ void loop() {
   // If the battery is low then deep sleep
   if (battery < lowBatteryLimitMv) {
     Serial.println("Low battery detected, going to sleep ...");
+    // Keep track of how many times this has happened
+    uint16_t sleepCount = preferences.getUShort("sleepcount", 0);  
+    preferences.putUShort("sleepcount", sleepCount+1);   
     // Put the system into a deep sleep that will be awakened using the timer
     esp_sleep_enable_timer_wakeup(DEEP_SLEEP_SECONDS * US_TO_S_FACTOR);
     esp_deep_sleep_start();
@@ -186,8 +192,9 @@ void loop() {
         uint16_t battery = checkBattery();
         
         // Build ping response
-        uint8_t snd_buf[36];
-        uint8_t snd_len = 36;
+        uint8_t snd_buf[40];
+        uint8_t snd_len = 40;
+        
         snd_buf[0] = VERSION;
         snd_buf[1] = 2;
         // Call sign
@@ -207,10 +214,18 @@ void loop() {
         snd_buf[17] = (uptime_seconds >> 16) & 0xff;
         snd_buf[18] = (uptime_seconds >>  8) & 0xff;
         snd_buf[19] =  uptime_seconds        & 0xff;
-        
+        // Boot count
+        uint16_t bootCount = preferences.getUShort("bootcount", 0);  
+        snd_buf[20] = (bootCount >>  8) & 0xff;
+        snd_buf[21] =  bootCount        & 0xff;
+        // Sleep count
+        uint16_t sleepCount = preferences.getUShort("sleepcount", 0);  
+        snd_buf[22] = (sleepCount >>  8) & 0xff;
+        snd_buf[23] =  sleepCount        & 0xff;
+
         // Copy the 16 byte payload of the ping request
         for (int i = 0; i < 16; i++) {
-          snd_buf[20 + i] = rec_buf[10 + i];
+          snd_buf[24 + i] = rec_buf[10 + i];
         }
   
         uint8_t rc = mesh_manager.sendtoWait(snd_buf, snd_len, rec_source);
