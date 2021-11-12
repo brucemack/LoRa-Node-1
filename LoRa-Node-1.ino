@@ -41,13 +41,16 @@ int codingRate = 5;
 int address = 0xf3;
 
 // Battery reading scale
-float batteryScale = (3.3 / 4096.0) * 2.3;
+float batteryScale = (3.3 / 4096.0) * 2.2;
+
 // Battery limit
 uint16_t lowBatteryLimitMv = 3600;
+//uint16_t lowBatteryLimitMv = 0;
 // Deep sleep duration when low battery is detected
 #define DEEP_SLEEP_SECONDS 60 * 15
 
-#define MY_NODE_ADDR 3
+//#define MY_NODE_ADDR 3
+#define MY_NODE_ADDR 4
 #define VERSION 1
 
 static char CALL[9] = "KC1FSZ  ";
