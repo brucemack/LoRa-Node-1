@@ -2,12 +2,19 @@
 // 80mA idle, 160mA transmit with normal clock
 // 30mA at 10 MHz clock rate
 
+// Install 
+// * RadioHead
+// * SimpleSerialShell
+
 #include <SPI.h>
 #include <RH_RF95.h>
 #include <RHMesh.h>
 #include "WiFi.h"
 #include <esp_task_wdt.h>
 #include <Preferences.h>
+#include <SimpleSerialShell.h>
+
+#define VERSION 2
 
 // Define the pins used by the LoRa transceiver module
 // ESP32
@@ -16,11 +23,6 @@
 #define dio0 4
 #define LED_PIN 2
 #define BATTERY_LEVEL_PIN 33
-
-// Arduino Pro Mini
-//#define ss 10
-//#define rst 9
-//#define dio0 2
 
 #define US_TO_S_FACTOR 1000000
 
@@ -40,18 +42,20 @@ int codingRate = 5;
 // Address
 int address = 0xf3;
 
-// Battery reading scale
-float batteryScale = (3.3 / 4096.0) * 2.2;
-
-// Battery limit
-uint16_t lowBatteryLimitMv = 3600;
-//uint16_t lowBatteryLimitMv = 0;
 // Deep sleep duration when low battery is detected
 #define DEEP_SLEEP_SECONDS 60 * 15
 
+// ===== NODE CONFIGURATION ================================================================
+// Battery reading scale
+float batteryScale = (3.3 / 4096.0) * 2.2;
+// Battery limit
+//uint16_t lowBatteryLimitMv = 3600;
+uint16_t lowBatteryLimitMv = 0;
+// ==========================================================================================
+
 //#define MY_NODE_ADDR 3
-#define MY_NODE_ADDR 4
-#define VERSION 1
+//#define MY_NODE_ADDR 4
+#define MY_NODE_ADDR 1
 
 static char CALL[9] = "KC1FSZ  ";
 
@@ -66,6 +70,78 @@ RH_RF95 rf95(ss, dio0);
 RHMesh mesh_manager(rf95, MY_NODE_ADDR);
 
 Preferences preferences;
+
+// Shell Stuff
+
+static auto msg_arg_error = F("Argument error");
+
+int helloWorld(int argc, char **argv) { 
+  shell.println("Hello!");
+}
+
+int sendReset(int argc, char **argv) { 
+
+  if (argc == 2) {
+
+    uint8_t targetNodeAddr = atoi(argv[1]);
+    
+    uint8_t data[32];
+    // VERSION
+    data[0] = VERSION;
+    // COMMAND
+    data[1] = 4;
+
+    shell.print("Resetting node ");
+    shell.println(targetNodeAddr);
+  
+    uint8_t rc = mesh_manager.sendtoWait(data, 26, targetNodeAddr);
+    if (rc != RH_ROUTER_ERROR_NONE) {
+      shell.println("Failed to send");
+    }
+        
+  } else {
+    shell.println(msg_arg_error);
+  }
+}
+
+int sendPing(int argc, char **argv) { 
+
+  static int counter = 0;
+  
+  if (argc == 2) {
+
+    uint8_t targetNodeAddr;
+    
+    if (argv[1][0] == '*') 
+      targetNodeAddr = RH_BROADCAST_ADDRESS;
+    else 
+      targetNodeAddr = atoi(argv[1]);
+    
+    uint8_t data[32];
+    // VERSION
+    data[0] = 1;
+    // COMMAND
+    data[1] = 1;
+    // Callsign
+    for (int i = 0; i < 8; i++)
+      data[2 + i] = CALL[i];
+    // Payload
+    for (int i = 0; i < 16; i++)
+      data[10 + i] = 0;
+    sprintf((char*)(data + 10), "KC1FSZ %d", counter++);
+
+    shell.print("Pinging node ");
+    shell.println(targetNodeAddr);
+  
+    uint8_t rc = mesh_manager.sendtoWait(data, 26, targetNodeAddr);
+    if (rc != RH_ROUTER_ERROR_NONE) {
+      shell.println("Failed to send");
+    }
+        
+  } else {
+    shell.println(msg_arg_error);
+  }
+}
 
 void configRadio(RH_RF95& radio) {
   //radio.setModemConfig(RH_RF95::ModemConfigChoice::Bw125Cr48Sf4096);
@@ -87,10 +163,10 @@ uint16_t checkBattery() {
 
 void setup() {
 
-  delay(5000);
+  delay(2000);
   
   Serial.begin(115200);
-  Serial.println("KC1FSZ LoRa Mesh System");
+  Serial.println(F("KC1FSZ LoRa Mesh System"));
 
   // LED
   pinMode(LED_PIN, OUTPUT);
@@ -99,7 +175,9 @@ void setup() {
   // Slow down ESP32 to 10 MHz in order to reduce battery consumption
   setCpuFrequencyMhz(10);
 
-  Serial.print("This is node ");
+  Serial.print(F("Version "));
+  Serial.println(VERSION);
+  Serial.print(F("This is node "));
   Serial.println(MY_NODE_ADDR);
   Serial.print(F("Crystal frequency "));
   Serial.println(getXtalFrequencyMhz());
@@ -118,6 +196,11 @@ void setup() {
   uint16_t sleepCount = preferences.getUShort("sleepcount", 0);  
   Serial.print(F("Sleep count: "));
   Serial.println(sleepCount);
+
+  shell.attach(Serial); 
+  shell.addCommand(F("hello"), helloWorld);
+  shell.addCommand(F("ping"), sendPing);
+  shell.addCommand(F("reset"), sendReset);
   
   // Reset the radio 
   pinMode(rst, OUTPUT);
@@ -169,12 +252,18 @@ void loop() {
     esp_sleep_enable_timer_wakeup(DEEP_SLEEP_SECONDS * US_TO_S_FACTOR);
     esp_deep_sleep_start();
   }
+
+  // Service the shell
+  shell.executeIfInput();
   
   // Wait to receive a message
   uint8_t rec_buf[RH_RF95_MAX_MESSAGE_LEN];
   uint8_t rec_len = RH_RF95_MAX_MESSAGE_LEN;
   uint8_t rec_source = 0;
-  uint16_t timeout = 1000;
+  // This is how long we sleep waiting for receive.  This will impact the 
+  // interactiviy of the shell and anything else that is interactive in
+  // the main loop.
+  uint16_t timeout = 250;
 
   if (mesh_manager.recvfromAckTimeout(rec_buf, &rec_len, timeout, &rec_source)) {
 
@@ -182,12 +271,9 @@ void loop() {
 
     int16_t last_rssi = (int)rf95.lastRssi();
     
-    // 0    Version
-    // 1    Command
-    // 2-31 Arguments
-
     // ---------------------------------------------------------------------------------------
     // Ping request
+    //
     if (rec_buf[1] == 1) {
 
         // Measure uptime
@@ -241,8 +327,62 @@ void loop() {
     } 
     
     // ---------------------------------------------------------------------------------------
-    // Message request (No ACK)
+    // Ping Response
+    //
+    else if (rec_buf[1] == 2) {
+
+      if (rec_len >= 40) {
+
+        // TODO: CREATE A STRUCT
+        int16_t counter = rec_buf[10] << 8;
+        counter |= rec_buf[11];
+        int16_t rssi = rec_buf[12] << 8;
+        rssi |= rec_buf[13];
+        uint16_t battery = rec_buf[14] << 8;
+        battery |= rec_buf[15];
+        uint32_t uptime_seconds = rec_buf[16] << 24;
+        uptime_seconds |= rec_buf[17] << 16;
+        uptime_seconds |= rec_buf[18] << 8;
+        uptime_seconds |= rec_buf[19];
+        uint16_t bootCount = rec_buf[20] << 8;
+        bootCount |= rec_buf[21];
+        uint16_t sleepCount = rec_buf[22] << 8;
+        sleepCount |= rec_buf[23];
+
+        Serial.print("{ \"count\": ");
+        Serial.print(counter, DEC);
+        Serial.print(", \"source\": ");
+        Serial.print(rec_source, DEC);
+        Serial.print(", \"lrsi\": ");
+        Serial.print(last_rssi, DEC);
+        Serial.print(", \"version\": ");
+        Serial.print(rec_buf[0], DEC);
+        Serial.print(", \"rrssi\": ");
+        Serial.print(rssi, DEC);
+        Serial.print(", \"battery\": ");
+        Serial.print(battery, DEC);
+        Serial.print(", \"uptime\": ");
+        Serial.print(uptime_seconds, DEC);
+        Serial.print(", \"boots\": ");
+        Serial.print(bootCount, DEC);
+        Serial.print(", \"sleeps\": ");
+        Serial.print(sleepCount, DEC);
+        Serial.print(", \"msg\": \"");
+        Serial.print((const char*) & (rec_buf[24]));
+        Serial.println("\" }");
+
+        digitalWrite(21, HIGH);
+        delay(300);
+        digitalWrite(21, LOW);
+      } else {
+        Serial.println(F("Length error"));
+        Serial.println(rec_len);
+      }
+    }
     
+    // ---------------------------------------------------------------------------------------
+    // Console Message request (No ACK)
+    //
     else if (rec_buf[1] == 3) {
 
       char rec_call[9];
@@ -274,8 +414,17 @@ void loop() {
         Serial.print(">>> ");
         Serial.println(rec_msg);
       }
-        
-    } else {
+    }
+    
+    // ---------------------------------------------------------------------------------------
+    // Reboot request)
+    //
+    else if (rec_buf[1] == 4) {
+      shell.println("Asked to reboot ...");
+      ESP.restart();
+    }
+    
+    else {
         Serial.print("Unrecognized command ");
         Serial.println(rec_buf[1], DEC);
     }
