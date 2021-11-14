@@ -49,13 +49,13 @@ int address = 0xf3;
 // Battery reading scale
 float batteryScale = (3.3 / 4096.0) * 2.2;
 // Battery limit
-//uint16_t lowBatteryLimitMv = 3600;
-uint16_t lowBatteryLimitMv = 0;
-// ==========================================================================================
+uint16_t lowBatteryLimitMv = 3600;
+//uint16_t lowBatteryLimitMv = 0;
 
 //#define MY_NODE_ADDR 3
-//#define MY_NODE_ADDR 4
-#define MY_NODE_ADDR 1
+#define MY_NODE_ADDR 4
+//#define MY_NODE_ADDR 1
+// ==========================================================================================
 
 static char CALL[9] = "KC1FSZ  ";
 
