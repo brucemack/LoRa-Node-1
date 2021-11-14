@@ -1,9 +1,13 @@
-// REMOTE
+// LoRa Birdhouse Mesh Network Project
+// Wellesley Amateur Radio Society
+//
+// Current measurements:
+//
 // 80mA idle, 160mA transmit with normal clock
 // 30mA at 10 MHz clock rate
 
-// Install 
-// * RadioHead
+// Prerequsisites to Install 
+// * RadioHead library (using 1.119)
 // * SimpleSerialShell
 
 #include <SPI.h>
@@ -14,7 +18,8 @@
 #include <Preferences.h>
 #include <SimpleSerialShell.h>
 
-#define VERSION 2
+// Current software version. Increment this when changes are made
+#define SW_VERSION 3
 
 // Define the pins used by the LoRa transceiver module
 // ESP32
@@ -27,19 +32,17 @@
 #define US_TO_S_FACTOR 1000000
 
 // Channel configurations
-//float frequency = 434;
 float frequency = 916;
 // Transmit power in dBm
 int txPower = 20;
-// Higher spreading factor for longer distance
+// Higher spreading factor for longer distance, longer transmit
 int spreadingFactor = 9;
 // Setup BandWidth, option: 7800,10400,15600,20800,31250,41700,62500,125000,250000,500000
 // Lower BandWidth for longer distance.
-//long signalBandwidth = 125000;
 long signalBandwidth = 31250;
 // Setup Coding Rate:5(4/5),6(4/6),7(4/7),8(4/8) 
 int codingRate = 5;
-// Address
+// Preamble Address
 int address = 0xf3;
 
 // Deep sleep duration when low battery is detected
@@ -47,13 +50,13 @@ int address = 0xf3;
 
 // ===== NODE CONFIGURATION ================================================================
 // Battery reading scale
-float batteryScale = (3.3 / 4096.0) * 2.2;
+float batteryScale = (3.3 / 4096.0) * 2.25;
 // Battery limit
 uint16_t lowBatteryLimitMv = 3600;
 //uint16_t lowBatteryLimitMv = 0;
 
-//#define MY_NODE_ADDR 3
-#define MY_NODE_ADDR 4
+#define MY_NODE_ADDR 3
+//#define MY_NODE_ADDR 4
 //#define MY_NODE_ADDR 1
 // ==========================================================================================
 
@@ -87,7 +90,7 @@ int sendReset(int argc, char **argv) {
     
     uint8_t data[32];
     // VERSION
-    data[0] = VERSION;
+    data[0] = SW_VERSION;
     // COMMAND
     data[1] = 4;
 
@@ -119,7 +122,7 @@ int sendPing(int argc, char **argv) {
     
     uint8_t data[32];
     // VERSION
-    data[0] = 1;
+    data[0] = SW_VERSION;
     // COMMAND
     data[1] = 1;
     // Callsign
@@ -143,6 +146,11 @@ int sendPing(int argc, char **argv) {
   }
 }
 
+int boot(int argc, char **argv) { 
+    shell.println("Asked to reboot ...");
+    ESP.restart();
+}
+
 void configRadio(RH_RF95& radio) {
   //radio.setModemConfig(RH_RF95::ModemConfigChoice::Bw125Cr48Sf4096);
   radio.setFrequency(frequency);
@@ -152,6 +160,7 @@ void configRadio(RH_RF95& radio) {
   radio.spiWrite(RH_RF95_REG_0B_OCP, 0x31);
   //radio.setSignalBandwidth(signalBandwidth);
   //radio.setCodingRate4(codingRate);
+  // TODO: NEED TO CHANGE THIS!
   //radio.setThisAddress(address);
 }
 
@@ -163,9 +172,10 @@ uint16_t checkBattery() {
 
 void setup() {
 
-  delay(2000);
-  
+  delay(1000);
   Serial.begin(115200);
+  delay(1000);
+  
   Serial.println(F("KC1FSZ LoRa Mesh System"));
 
   // LED
@@ -176,7 +186,7 @@ void setup() {
   setCpuFrequencyMhz(10);
 
   Serial.print(F("Version "));
-  Serial.println(VERSION);
+  Serial.println(SW_VERSION);
   Serial.print(F("This is node "));
   Serial.println(MY_NODE_ADDR);
   Serial.print(F("Crystal frequency "));
@@ -201,6 +211,7 @@ void setup() {
   shell.addCommand(F("hello"), helloWorld);
   shell.addCommand(F("ping"), sendPing);
   shell.addCommand(F("reset"), sendReset);
+  shell.addCommand(F("boot"), boot);
   
   // Reset the radio 
   pinMode(rst, OUTPUT);
@@ -214,10 +225,12 @@ void setup() {
 
   if (!mesh_manager.init()) {
     Serial.println("LoRa init failed");
+    // TODO: THIS IS A PROBLEM - NEED TO ARRANGE FOR A REBOOT
   } else {
+    
     configRadio(rf95);
 
-    // Diagnostics
+    // Indicator that things are working
     Serial.println("LoRa Initializing OK!");
     digitalWrite(LED_PIN, HIGH);
     delay(200);
@@ -265,7 +278,14 @@ void loop() {
   // the main loop.
   uint16_t timeout = 250;
 
-  if (mesh_manager.recvfromAckTimeout(rec_buf, &rec_len, timeout, &rec_source)) {
+  uint8_t rec_dest;
+  uint8_t rec_id;
+  uint8_t rec_flags;
+  uint8_t rec_hops;
+
+
+  if (mesh_manager.recvfromAckTimeout(rec_buf, &rec_len, timeout, &rec_source,
+      &rec_dest, &rec_id, &rec_flags, &rec_hops)) {
 
     rec_count++;
 
@@ -284,7 +304,7 @@ void loop() {
         uint8_t snd_buf[40];
         uint8_t snd_len = 40;
         
-        snd_buf[0] = VERSION;
+        snd_buf[0] = SW_VERSION;
         snd_buf[1] = 2;
         // Call sign
         for (int i = 0; i < 8; i++)
@@ -355,6 +375,8 @@ void loop() {
         Serial.print(rec_source, DEC);
         Serial.print(", \"lrsi\": ");
         Serial.print(last_rssi, DEC);
+        Serial.print(", \"hops\": ");
+        Serial.print(rec_hops, DEC);
         Serial.print(", \"version\": ");
         Serial.print(rec_buf[0], DEC);
         Serial.print(", \"rrssi\": ");
